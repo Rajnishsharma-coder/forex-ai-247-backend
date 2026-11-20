@@ -8,19 +8,23 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ==========================================
+// 1. 24/7 BOT STATE
+// ==========================================
 let botState = {
   isRunning: false,
-  mode: "PAPER",
+  mode: "PAPER", // "PAPER" ya "LIVE"
   pair: "EUR/USD",
   lotSize: 0.01,
   intervalSeconds: 60,
   geminiApiKey: process.env.GEMINI_API_KEY || "",
-  broker: "mt5",
+  broker: "mt5", // "angelone", "dhan", ya "mt5"
   credentials: {},
   lastSignal: null,
   tradeLogs: [],
 };
 
+// Yahoo Finance Symbol Mapping (Forex + Gold + Bitcoin)
 const SYMBOL_MAP = {
   "EUR/USD": "EURUSD=X",
   "GBP/USD": "GBPUSD=X",
@@ -30,6 +34,9 @@ const SYMBOL_MAP = {
   "BTC/USD": "BTC-USD",
 };
 
+// ==========================================
+// 2. FREE LIVE MARKET DATA FETCHER
+// ==========================================
 async function fetchLiveCandles(pair) {
   const yahooSymbol = SYMBOL_MAP[pair] || "EURUSD=X";
   const url = `https://yahoo.com{yahooSymbol}?interval=15m&range=1d`;
@@ -38,8 +45,8 @@ async function fetchLiveCandles(pair) {
     headers: { "User-Agent": "Mozilla/5.0" },
   });
 
-  const result = response.data.chart.result[0];
-  const quotes = result.indicators.quote[0];
+  const result = response.data.chart.result;
+  const quotes = result.indicators.quote;
   const timestamps = result.timestamp;
 
   const candles = [];
@@ -57,6 +64,9 @@ async function fetchLiveCandles(pair) {
   return candles;
 }
 
+// ==========================================
+// 3. GEMINI AI SIGNAL GENERATOR (WITH AUTO-FALLBACK)
+// ==========================================
 async function analyzeMarketWithGemini(pair, candles) {
   if (!botState.geminiApiKey) {
     throw new Error("Gemini API Key missing in bot configuration.");
@@ -79,19 +89,35 @@ Respond ONLY in valid JSON format with no markdown:
 }
 Only give BUY or SELL if confidence >= 78 and trend/momentum is clear; otherwise return WAIT.`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: prompt,
-    config: {
-      systemInstruction:
-        "You are an institutional quantitative forex trading algorithm. Return strictly valid JSON only.",
-      responseMimeType: "application/json",
-    },
-  });
+  const modelsToTry = [
+    "gemini-3.8-flash",
+    "gemini-3.8-flash-lite",
+    "gemini-3.5-flash",
+  ];
 
-  return JSON.parse(response.text);
+  for (const modelName of modelsToTry) {
+    try {
+      const response = await ai.models.generateContent({
+        model: modelName,
+        contents: prompt,
+        config: {
+          systemInstruction:
+            "You are an institutional quantitative forex trading algorithm. Return strictly valid JSON only.",
+          responseMimeType: "application/json",
+        },
+      });
+      return JSON.parse(response.text);
+    } catch (err) {
+      console.warn(`Model ${modelName} busy or unavailable, trying next fallback...`);
+    }
+  }
+
+  throw new Error("All Gemini models temporarily busy.");
 }
 
+// ==========================================
+// 4. MULTI-BROKER ORDER EXECUTOR
+// ==========================================
 async function executeBrokerTrade(signalData) {
   const { broker, credentials, pair, lotSize, mode } = botState;
 
@@ -181,6 +207,9 @@ async function executeBrokerTrade(signalData) {
   throw new Error("Unsupported broker configured.");
 }
 
+// ==========================================
+// 5. 24/7 BACKGROUND AUTO-TRADING LOOP
+// ==========================================
 async function runTradingCycle() {
   if (!botState.isRunning) return;
 
@@ -221,6 +250,9 @@ async function runTradingCycle() {
 
 setInterval(runTradingCycle, 60 * 1000);
 
+// ==========================================
+// 6. MOBILE APP REMOTE CONTROL ENDPOINTS
+// ==========================================
 app.get("/health", (req, res) => {
   res.json({
     status: "ONLINE_24_7",
@@ -266,3 +298,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`24/7 Forex AI Auto-Trading Server active on port ${PORT}`);
 });
+
+
